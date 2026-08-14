@@ -27,3 +27,8 @@ zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
 [lib]
 path = "src/lib.rs"
 crate-type = ["cdylib"]
+
+[profile.release]
+codegen-units = 1
+lto = false
+

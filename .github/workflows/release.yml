@@ -1,0 +1,34 @@
+name: Build release module
+
+on:
+  release:
+    types:
+      - created
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y protobuf-compiler
+
+      - name: Compile dynamic module
+        run: cargo build --locked --release
+
+      - name: Attach dynamic module to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" target/release/libenvoy_acme_dynmod.so --clobber --repo "$GITHUB_REPOSITORY"
