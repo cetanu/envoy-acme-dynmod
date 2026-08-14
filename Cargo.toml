@@ -19,6 +19,10 @@ tonic-prost = "0.14.6"
 tracing = "0.1.44"
 x509-parser = "0.18.1"
 
+[features]
+default = []
+envoy_1_37 = []
+
 [build-dependencies]
 reqwest = { version = "0.12.24", default-features = false, features = ["blocking", "rustls-tls"] }
 tonic-prost-build = "0.14.6"

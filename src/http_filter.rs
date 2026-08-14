@@ -42,7 +42,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for AcmeFilter {
 
         let method = header(envoy, ":method").unwrap_or_default();
         if method != "GET" && method != "HEAD" {
-            envoy.send_response(
+            send_response(
+                envoy,
                 405,
                 &[("allow", b"GET, HEAD"), ("cache-control", b"no-store")],
                 None,
@@ -51,7 +52,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for AcmeFilter {
             return StopIteration;
         }
         let Some(token) = challenge_token(&path) else {
-            envoy.send_response(
+            send_response(
+                envoy,
                 404,
                 &[("cache-control", b"no-store")],
                 None,
@@ -70,7 +72,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for AcmeFilter {
         match response.as_deref() {
             Some(ChallengeResponse { body, .. }) => {
                 let response_body = (method == "GET").then_some(body.as_bytes());
-                envoy.send_response(
+                send_response(
+                    envoy,
                     200,
                     &[
                         ("content-type", b"text/plain"),
@@ -80,7 +83,8 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for AcmeFilter {
                     Some("acme_http01_challenge"),
                 );
             }
-            None => envoy.send_response(
+            None => send_response(
+                envoy,
                 404,
                 &[("cache-control", b"no-store")],
                 None,
@@ -89,6 +93,28 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for AcmeFilter {
         }
         StopIteration
     }
+}
+
+#[cfg(feature = "envoy_1_37")]
+fn send_response<'a, EHF: EnvoyHttpFilter>(
+    envoy: &mut EHF,
+    status_code: u32,
+    headers: &[(&'a str, &'a [u8])],
+    body: Option<&'a [u8]>,
+    details: Option<&'a str>,
+) {
+    envoy.send_response(status_code, headers.to_vec(), body, details);
+}
+
+#[cfg(not(feature = "envoy_1_37"))]
+fn send_response<'a, EHF: EnvoyHttpFilter>(
+    envoy: &mut EHF,
+    status_code: u32,
+    headers: &[(&'a str, &'a [u8])],
+    body: Option<&'a [u8]>,
+    details: Option<&'a str>,
+) {
+    envoy.send_response(status_code, headers, body, details);
 }
 
 fn header<EHF: EnvoyHttpFilter>(envoy: &EHF, name: &str) -> Option<String> {

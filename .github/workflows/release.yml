@@ -11,6 +11,14 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    name: Build Envoy ${{ matrix.envoy_version }} module
+
+    strategy:
+      matrix:
+        envoy_version:
+          - "1.39.0"
+          - "1.38.0"
+          - "1.37.0"
 
     steps:
       - name: Check out release tag
@@ -24,11 +32,31 @@ jobs:
       - name: Install protobuf compiler
         run: sudo apt-get update && sudo apt-get install --no-install-recommends -y protobuf-compiler
 
+      - name: Select Envoy version
+        env:
+          ENVOY_VERSION: ${{ matrix.envoy_version }}
+        run: |
+          sed -i.bak "s|tag = \"v[0-9.]*\"|tag = \"v${ENVOY_VERSION}\"|" Cargo.toml
+          sed -i.bak "s|const ENVOY_TAG: &str = \"v[0-9.]*\";|const ENVOY_TAG: \&str = \"v${ENVOY_VERSION}\";|" build.rs
+          rm Cargo.toml.bak build.rs.bak
+          cargo update -p envoy-proxy-dynamic-modules-rust-sdk
+
       - name: Compile dynamic module
-        run: cargo build --locked --release
+        env:
+          ENVOY_VERSION: ${{ matrix.envoy_version }}
+        run: |
+          if [ "$ENVOY_VERSION" = "1.37.0" ]; then
+            cargo build --locked --release --features envoy_1_37
+          else
+            cargo build --locked --release
+          fi
 
       - name: Attach dynamic module to release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$RELEASE_TAG" target/release/libenvoy_acme_dynmod.so --clobber --repo "$GITHUB_REPOSITORY"
+          ENVOY_VERSION: ${{ matrix.envoy_version }}
+        run: |
+          module_path="target/release/libenvoy_acme_dynmod-envoy-${ENVOY_VERSION}.so"
+          mv target/release/libenvoy_acme_dynmod.so "$module_path"
+          gh release upload "$RELEASE_TAG" "$module_path" --clobber --repo "$GITHUB_REPOSITORY"

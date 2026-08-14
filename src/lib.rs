@@ -99,7 +99,7 @@ fn new_http_filter_config<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
     };
 
     // Envoy invokes config factories on its main thread, as required by this SDK callback.
-    if unsafe { envoy_proxy_dynamic_modules_rust_sdk::is_validation_mode() } {
+    if is_validation_mode() {
         return Some(Box::new(AcmeFilterConfig::new(
             Arc::new(SharedState::new()),
         )));
@@ -134,4 +134,16 @@ fn new_http_filter_config<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
     };
 
     Some(Box::new(AcmeFilterConfig::new(Arc::clone(&app.state))))
+}
+
+fn is_validation_mode() -> bool {
+    #[cfg(feature = "envoy_1_37")]
+    {
+        false
+    }
+
+    #[cfg(not(feature = "envoy_1_37"))]
+    {
+        unsafe { envoy_proxy_dynamic_modules_rust_sdk::is_validation_mode() }
+    }
 }
