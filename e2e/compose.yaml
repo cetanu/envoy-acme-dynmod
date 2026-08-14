@@ -1,0 +1,81 @@
+name: envoy-acme-e2e
+
+services:
+  challtestsrv:
+    image: ghcr.io/letsencrypt/pebble-challtestsrv:latest
+    command:
+      - -defaultIPv4
+      - 10.30.50.4
+      - -defaultIPv6
+      - ""
+      - -http01
+      - ""
+      - -https01
+      - ""
+      - -tlsalpn01
+      - ""
+    networks:
+      acme:
+        ipv4_address: 10.30.50.3
+
+  pebble:
+    image: ghcr.io/letsencrypt/pebble:latest
+    command:
+      - -config
+      - /test/config/pebble-config.json
+      - -dnsserver
+      - 10.30.50.3:8053
+    environment:
+      PEBBLE_AUTHZREUSE: "0"
+      PEBBLE_VA_ALWAYS_VALID: "0"
+      PEBBLE_VA_NOSLEEP: "1"
+      PEBBLE_WFE_NONCEREJECT: "0"
+    volumes:
+      - ./pebble-config.json:/test/config/pebble-config.json:ro
+    depends_on:
+      - challtestsrv
+    networks:
+      acme:
+        ipv4_address: 10.30.50.2
+
+  envoy:
+    build:
+      context: ..
+      dockerfile: e2e/Dockerfile
+    environment:
+      ENVOY_DYNAMIC_MODULES_SEARCH_PATH: /usr/local/lib/envoy-dynamic-modules
+      SSL_CERT_FILE: /etc/pebble/pebble.minica.pem
+    user: "0:0"
+    volumes:
+      - acme-state:/var/lib/envoy-acme
+    ports:
+      - "8080:80"
+      - "8443:443"
+      - "9901:9901"
+    depends_on:
+      - pebble
+    networks:
+      acme:
+        ipv4_address: 10.30.50.4
+
+  test:
+    profiles: [test]
+    build:
+      context: .
+      dockerfile: Test.Dockerfile
+    volumes:
+      - acme-state:/state:ro
+    depends_on:
+      - envoy
+    networks:
+      - acme
+
+volumes:
+  acme-state:
+
+networks:
+  acme:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.30.50.0/24
