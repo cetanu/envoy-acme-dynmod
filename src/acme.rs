@@ -14,7 +14,7 @@ use tokio::time::sleep;
 use x509_parser::pem::parse_x509_pem;
 
 use crate::{
-    config::Config,
+    config::{CertificateDelivery, Config},
     state::{Certificate, ChallengeResponse, SharedState},
     storage::DiskStorage,
 };
@@ -22,7 +22,7 @@ use crate::{
 type BoxError = Box<dyn Error + Send + Sync>;
 
 pub async fn run(config: Arc<Config>, state: Arc<SharedState>, storage: DiskStorage) {
-    if let Err(error) = load_persisted_certificate(&state, &storage).await {
+    if let Err(error) = load_persisted_certificate(&config, &state, &storage).await {
         envoy_log_error!("failed to load persisted certificate: {error}");
     }
 
@@ -39,12 +39,13 @@ pub async fn run(config: Arc<Config>, state: Arc<SharedState>, storage: DiskStor
 }
 
 async fn load_persisted_certificate(
+    config: &Config,
     state: &SharedState,
     storage: &DiskStorage,
 ) -> Result<(), BoxError> {
     if let Some(certificate) = storage.load_certificate().await? {
         needs_renewal(&certificate.chain_pem, Duration::ZERO)?;
-        state.publish(certificate);
+        publish_certificate(config, state, storage, certificate).await?;
     }
     Ok(())
 }
@@ -99,8 +100,30 @@ async fn renewal_cycle(
     );
     let certificate = issue_certificate(&account, config, state).await?;
     storage.save_certificate(&certificate).await?;
+    publish_certificate(config, state, storage, certificate).await?;
+    match config.certificate_delivery {
+        CertificateDelivery::File => envoy_log_info!("published renewed certificate files"),
+        CertificateDelivery::Grpc => envoy_log_info!("published renewed SDS secret"),
+    }
+    Ok(())
+}
+
+async fn publish_certificate(
+    config: &Config,
+    state: &SharedState,
+    storage: &DiskStorage,
+    certificate: Certificate,
+) -> Result<(), BoxError> {
+    if config.certificate_delivery == CertificateDelivery::File {
+        storage
+            .save_certificate_files(
+                &certificate,
+                &config.certificate_path(),
+                &config.private_key_path(),
+            )
+            .await?;
+    }
     state.publish(certificate);
-    envoy_log_info!("published renewed SDS secret");
     Ok(())
 }
 

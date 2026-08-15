@@ -20,10 +20,20 @@ pub struct Config {
     pub contact_email: String,
     #[validate(custom = validate_storage_path)]
     pub storage_path: PathBuf,
-    #[validate(custom = validate_sds_address)]
-    pub sds_address: String,
-    #[validate(custom = validate_secret_name)]
-    pub secret_name: String,
+    #[serde(default)]
+    #[validate(custom = validate_optional_path)]
+    pub certificate_path: Option<PathBuf>,
+    #[serde(default)]
+    #[validate(custom = validate_optional_path)]
+    pub private_key_path: Option<PathBuf>,
+    #[serde(default)]
+    pub certificate_delivery: CertificateDelivery,
+    #[serde(default)]
+    #[validate(custom = validate_optional_sds_address)]
+    pub sds_address: Option<String>,
+    #[serde(default)]
+    #[validate(custom = validate_optional_secret_name)]
+    pub secret_name: Option<String>,
     #[serde(default = "default_directory_url")]
     #[validate(custom = validate_acme_directory_url)]
     pub acme_directory_url: String,
@@ -45,14 +55,29 @@ impl Config {
         config
             .validate()
             .map_err(|error| format!("invalid configuration: {error}"))?;
+        validate_delivery_config(&config)?;
         config.domains.sort();
         Ok(config)
     }
 
     pub fn sds_address(&self) -> SocketAddr {
         self.sds_address
+            .as_deref()
+            .expect("configuration was validated")
             .parse()
             .expect("configuration was validated")
+    }
+
+    pub fn certificate_path(&self) -> PathBuf {
+        self.certificate_path
+            .clone()
+            .unwrap_or_else(|| self.storage_path.join("certificate.pem"))
+    }
+
+    pub fn private_key_path(&self) -> PathBuf {
+        self.private_key_path
+            .clone()
+            .unwrap_or_else(|| self.storage_path.join("private-key.pem"))
     }
 
     pub fn renewal_window(&self) -> Duration {
@@ -62,6 +87,14 @@ impl Config {
     pub fn check_interval(&self) -> Duration {
         Duration::from_secs(self.check_interval_seconds)
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum CertificateDelivery {
+    #[default]
+    File,
+    Grpc,
 }
 
 fn validate_domains(domains: &[String]) -> Result<(), ValidationError> {
@@ -103,7 +136,21 @@ fn validate_storage_path(storage_path: &Path) -> Result<(), ValidationError> {
     Ok(())
 }
 
-fn validate_sds_address(sds_address: &str) -> Result<(), ValidationError> {
+fn validate_optional_path(path: &Option<PathBuf>) -> Result<(), ValidationError> {
+    if let Some(path) = path
+        && !path.is_absolute()
+    {
+        return Err(ValidationError::Custom(
+            "certificate and private key paths must be absolute".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_optional_sds_address(sds_address: &Option<String>) -> Result<(), ValidationError> {
+    let Some(sds_address) = sds_address else {
+        return Ok(());
+    };
     let address = sds_address
         .parse::<SocketAddr>()
         .map_err(|error| ValidationError::Custom(format!("invalid sds_address: {error}")))?;
@@ -115,11 +162,29 @@ fn validate_sds_address(sds_address: &str) -> Result<(), ValidationError> {
     Ok(())
 }
 
-fn validate_secret_name(secret_name: &str) -> Result<(), ValidationError> {
-    if secret_name.trim().is_empty() {
+fn validate_optional_secret_name(secret_name: &Option<String>) -> Result<(), ValidationError> {
+    if secret_name
+        .as_deref()
+        .is_some_and(|name| name.trim().is_empty())
+    {
         return Err(ValidationError::Custom(
             "secret_name must not be empty".into(),
         ));
+    }
+    Ok(())
+}
+
+fn validate_delivery_config(config: &Config) -> Result<(), String> {
+    if config.certificate_delivery == CertificateDelivery::Grpc {
+        if config.sds_address.is_none() {
+            return Err("sds_address is required when certificate_delivery is grpc".into());
+        }
+        if config.secret_name.is_none() {
+            return Err("secret_name is required when certificate_delivery is grpc".into());
+        }
+    }
+    if config.certificate_path() == config.private_key_path() {
+        return Err("certificate_path and private_key_path must be different".into());
     }
     Ok(())
 }
@@ -155,9 +220,7 @@ mod tests {
             br#"{
                 "domains": ["www.example.com", "example.com"],
                 "contact_email": "ops@example.com",
-                "storage_path": "/var/lib/envoy-acme",
-                "sds_address": "127.0.0.1:50051",
-                "secret_name": "example-certificate"
+                "storage_path": "/var/lib/envoy-acme"
             }"#,
         )
         .unwrap();
@@ -165,6 +228,18 @@ mod tests {
         assert_eq!(config.domains, ["example.com", "www.example.com"]);
         assert_eq!(config.renew_before_days, 30);
         assert_eq!(config.check_interval_seconds, 43_200);
+        assert_eq!(
+            config.certificate_delivery,
+            super::CertificateDelivery::File
+        );
+        assert_eq!(
+            config.certificate_path(),
+            std::path::Path::new("/var/lib/envoy-acme/certificate.pem")
+        );
+        assert_eq!(
+            config.private_key_path(),
+            std::path::Path::new("/var/lib/envoy-acme/private-key.pem")
+        );
     }
 
     #[test]
@@ -181,5 +256,20 @@ mod tests {
         .unwrap_err();
 
         assert!(error.contains("invalid HTTP-01 domain"));
+    }
+
+    #[test]
+    fn requires_sds_settings_for_grpc_delivery() {
+        let error = Config::parse(
+            br#"{
+                "domains": ["example.com"],
+                "contact_email": "ops@example.com",
+                "storage_path": "/tmp/acme",
+                "certificate_delivery": "grpc"
+            }"#,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("sds_address is required"));
     }
 }

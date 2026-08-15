@@ -102,6 +102,38 @@ impl DiskStorage {
         set_owner_only_file(&temporary).await?;
         fs::rename(&temporary, &destination).await
     }
+
+    pub async fn save_certificate_files(
+        &self,
+        certificate: &Certificate,
+        certificate_path: &Path,
+        private_key_path: &Path,
+    ) -> io::Result<()> {
+        let certificate_temporary = prepare_temporary_file(certificate_path).await?;
+        let private_key_temporary = prepare_temporary_file(private_key_path).await?;
+        fs::write(&certificate_temporary, certificate.chain_pem.as_bytes()).await?;
+        fs::write(
+            &private_key_temporary,
+            certificate.private_key_pem.as_bytes(),
+        )
+        .await?;
+        set_owner_only_file(&certificate_temporary).await?;
+        set_owner_only_file(&private_key_temporary).await?;
+        fs::rename(&certificate_temporary, certificate_path).await?;
+        fs::rename(&private_key_temporary, private_key_path).await
+    }
+}
+
+async fn prepare_temporary_file(path: &Path) -> io::Result<PathBuf> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::other("certificate output path has no parent"))?;
+    fs::create_dir_all(parent).await?;
+
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| io::Error::other("certificate output path has no file name"))?;
+    Ok(parent.join(format!(".{}.tmp", file_name.to_string_lossy())))
 }
 
 #[cfg(unix)]

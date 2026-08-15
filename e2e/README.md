@@ -20,7 +20,8 @@ The test proves that:
 2. Pebble fetches the HTTP-01 response from Envoy on port 80. Validation is not
    bypassed.
 3. The module persists its account and issued certificate.
-4. Envoy receives the certificate over SDS and serves it on TLS port 443.
+4. Envoy receives the certificate over the explicitly configured gRPC SDS
+   path and serves it on TLS port 443.
 5. The issued certificate contains the `acme.test` SAN.
 
 Host ports are HTTP `8080`, HTTPS `8443`, and Envoy admin `9901`. The environment

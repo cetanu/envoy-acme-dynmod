@@ -7,7 +7,7 @@ mod storage;
 
 use std::sync::{Arc, OnceLock};
 
-use config::Config;
+use config::{CertificateDelivery, Config};
 use envoy_proxy_dynamic_modules_rust_sdk::{
     EnvoyHttpFilter, EnvoyHttpFilterConfig, HttpFilterConfig, declare_init_functions,
 };
@@ -43,24 +43,32 @@ impl App {
             .block_on(storage.prepare())
             .map_err(|error| format!("failed to prepare storage: {error}"))?;
 
-        let listener = runtime
-            .block_on(TcpListener::bind(config.sds_address()))
-            .map_err(|error| format!("failed to bind SDS listener: {error}"))?;
+        if config.certificate_delivery == CertificateDelivery::Grpc {
+            let listener = runtime
+                .block_on(TcpListener::bind(config.sds_address()))
+                .map_err(|error| format!("failed to bind SDS listener: {error}"))?;
 
-        let sds = SdsService::new(config.secret_name.clone(), Arc::clone(&state));
-        runtime.spawn(async move {
-            let result = Server::builder()
-                .add_service(
-                    proto::envoy::service::secret::v3::secret_discovery_service_server::SecretDiscoveryServiceServer::new(sds),
-                )
-                .serve_with_incoming(TcpListenerStream::new(listener))
-                .await;
-            if let Err(error) = result {
-                envoy_proxy_dynamic_modules_rust_sdk::envoy_log_error!(
-                    "SDS server stopped: {error}"
-                );
-            }
-        });
+            let sds = SdsService::new(
+                config
+                    .secret_name
+                    .clone()
+                    .expect("configuration was validated"),
+                Arc::clone(&state),
+            );
+            runtime.spawn(async move {
+                let result = Server::builder()
+                    .add_service(
+                        proto::envoy::service::secret::v3::secret_discovery_service_server::SecretDiscoveryServiceServer::new(sds),
+                    )
+                    .serve_with_incoming(TcpListenerStream::new(listener))
+                    .await;
+                if let Err(error) = result {
+                    envoy_proxy_dynamic_modules_rust_sdk::envoy_log_error!(
+                        "SDS server stopped: {error}"
+                    );
+                }
+            });
+        }
         runtime.spawn(acme::run(Arc::clone(&config), Arc::clone(&state), storage));
 
         Ok(Arc::new(Self {

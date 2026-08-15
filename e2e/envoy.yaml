@@ -52,6 +52,7 @@ static_resources:
                             "domains":["acme.test"],
                             "contact_email":"admin@acme.test",
                             "storage_path":"/var/lib/envoy-acme",
+                            "certificate_delivery":"grpc",
                             "sds_address":"127.0.0.1:50051",
                             "secret_name":"acme.test",
                             "acme_directory_url":"https://pebble:14000/dir",
