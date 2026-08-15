@@ -52,9 +52,7 @@ static_resources:
                             "domains":["acme.test"],
                             "contact_email":"admin@acme.test",
                             "storage_path":"/var/lib/envoy-acme",
-                            "certificate_delivery":"grpc",
-                            "sds_address":"127.0.0.1:50051",
-                            "secret_name":"acme.test",
+                            "certificate_delivery":"file",
                             "acme_directory_url":"https://pebble:14000/dir",
                             "renew_before_days":30,
                             "check_interval_seconds":5
@@ -62,61 +60,3 @@ static_resources:
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
-
-    - name: https
-      address:
-        socket_address:
-          address: 0.0.0.0
-          port_value: 443
-      filter_chains:
-        - transport_socket:
-            name: envoy.transport_sockets.tls
-            typed_config:
-              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
-              common_tls_context:
-                tls_certificate_sds_secret_configs:
-                  - name: acme.test
-                    sds_config:
-                      resource_api_version: V3
-                      api_config_source:
-                        api_type: GRPC
-                        transport_api_version: V3
-                        grpc_services:
-                          - envoy_grpc:
-                              cluster_name: acme_sds
-          filters:
-            - name: envoy.filters.network.http_connection_manager
-              typed_config:
-                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
-                stat_prefix: https
-                route_config:
-                  name: https
-                  virtual_hosts:
-                    - name: all
-                      domains: ["*"]
-                      routes:
-                        - match:
-                            prefix: "/"
-                          direct_response:
-                            status: 200
-                            body:
-                              inline_string: "envoy-acme-tls\n"
-                http_filters:
-                  - name: envoy.filters.http.router
-                    typed_config:
-                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
-
-  clusters:
-    - name: acme_sds
-      type: STATIC
-      connect_timeout: 1s
-      http2_protocol_options: {}
-      load_assignment:
-        cluster_name: acme_sds
-        endpoints:
-          - lb_endpoints:
-              - endpoint:
-                  address:
-                    socket_address:
-                      address: 127.0.0.1
-                      port_value: 50051

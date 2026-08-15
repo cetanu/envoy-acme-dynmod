@@ -9,7 +9,7 @@ e2e: e2e-up e2e-verify
 e2e-up:
     {{ compose }} up --detach --build envoy
 
-# Verify certificate persistence, HTTP interception, SDS delivery, and the TLS SAN.
+# Verify certificate persistence, HTTP interception, file delivery, and the TLS SAN.
 e2e-verify:
     {{ compose }} --profile test run --rm --no-deps -T --build test
 

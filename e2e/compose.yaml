@@ -50,7 +50,6 @@ services:
       - acme-state:/var/lib/envoy-acme
     ports:
       - "8080:80"
-      - "8443:443"
       - "9901:9901"
     depends_on:
       - pebble

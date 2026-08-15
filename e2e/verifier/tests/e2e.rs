@@ -1,7 +1,6 @@
 use std::{
     error::Error,
     fs, io,
-    net::SocketAddr,
     path::Path,
     thread,
     time::{Duration, Instant},
@@ -22,37 +21,28 @@ struct StoredCertificate {
 }
 
 #[test]
-fn pebble_http01_and_sds() -> Result<(), Box<dyn Error>> {
-    let tls_client = Client::builder()
-        .danger_accept_invalid_certs(true)
-        .resolve(DOMAIN, SocketAddr::from(([10, 30, 50, 4], 443)))
-        .build()?;
-
-    wait_for_certificate(&tls_client)?;
+fn pebble_http01_and_file_delivery() -> Result<(), Box<dyn Error>> {
+    wait_for_certificate_files()?;
     verify_persistence()?;
     verify_plain_http()?;
     verify_challenge_miss()?;
 
-    println!(
-        "E2E passed: Pebble validated HTTP-01 through the dynamic module and Envoy serves the SDS certificate."
-    );
+    println!("E2E passed: Pebble validated HTTP-01 and the module wrote the certificate files.");
     Ok(())
 }
 
-fn wait_for_certificate(client: &Client) -> Result<(), Box<dyn Error>> {
+fn wait_for_certificate_files() -> Result<(), Box<dyn Error>> {
     let started = Instant::now();
     loop {
-        let ready = client
-            .get(format!("https://{DOMAIN}/"))
-            .send()
-            .and_then(reqwest::blocking::Response::error_for_status)
-            .and_then(reqwest::blocking::Response::text)
-            .is_ok_and(|body| body.trim() == "envoy-acme-tls");
-        if ready {
+        let certificate_ready = fs::metadata("/state/certificate.pem")
+            .is_ok_and(|metadata| metadata.len() > 0);
+        let private_key_ready = fs::metadata("/state/private-key.pem")
+            .is_ok_and(|metadata| metadata.len() > 0);
+        if certificate_ready && private_key_ready {
             return Ok(());
         }
         if started.elapsed() >= TIMEOUT {
-            return Err("timed out waiting for ACME issuance and the Envoy TLS listener".into());
+            return Err("timed out waiting for ACME issuance and certificate files".into());
         }
         thread::sleep(Duration::from_secs(1));
     }
@@ -67,7 +57,16 @@ fn verify_persistence() -> Result<(), Box<dyn Error>> {
         return Err("persisted private key is empty".into());
     }
 
-    let (_, pem) = parse_x509_pem(stored.certificate_chain_pem.as_bytes())
+    let certificate_file = fs::read_to_string("/state/certificate.pem")?;
+    if certificate_file != stored.certificate_chain_pem {
+        return Err("certificate.pem does not match persisted certificate".into());
+    }
+    let private_key_file = fs::read_to_string("/state/private-key.pem")?;
+    if private_key_file != stored.private_key_pem {
+        return Err("private-key.pem does not match persisted private key".into());
+    }
+
+    let (_, pem) = parse_x509_pem(certificate_file.as_bytes())
         .map_err(|error| invalid_data(error.to_string()))?;
     let certificate = pem
         .parse_x509()
