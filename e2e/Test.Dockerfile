@@ -11,5 +11,6 @@ RUN cargo test --locked --release --test e2e --no-run \
 FROM docker.io/library/alpine:3.22
 
 COPY --from=builder /envoy-acme-e2e /usr/local/bin/
+COPY pebble.minica.pem /etc/pebble/pebble.minica.pem
 ENTRYPOINT ["/usr/local/bin/envoy-acme-e2e"]
 CMD ["--nocapture"]

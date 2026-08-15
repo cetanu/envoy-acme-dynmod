@@ -21,8 +21,9 @@ The test proves that:
    bypassed.
 3. The module persists its account and issued certificate.
 4. The module writes the issued certificate and private key to PEM files.
-5. The issued certificate contains the `acme.test` SAN and matches the
-   persisted certificate.
+5. The issued certificate matches the persisted certificate and private key.
+6. A TLS verifier accepts the certificate for `acme.test` at the current time
+   with Pebble's actual issuance root as its trust anchor.
 
 Host ports are HTTP `8080` and Envoy admin `9901`. The environment is retained
 after the test so failures can be inspected. It can be controlled with:
