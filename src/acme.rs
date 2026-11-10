@@ -117,7 +117,7 @@ async fn publish_certificate(
                 &config.certificate_path(),
                 &config.private_key_path(),
             )
-            .await?;
+        .await?;
     state.publish(certificate);
     Ok(())
 }
