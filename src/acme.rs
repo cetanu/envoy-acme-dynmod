@@ -14,7 +14,7 @@ use tokio::time::sleep;
 use x509_parser::pem::parse_x509_pem;
 
 use crate::{
-    config::{CertificateDelivery, Config},
+    config::Config,
     state::{Certificate, ChallengeResponse, SharedState},
     storage::DiskStorage,
 };
@@ -101,10 +101,7 @@ async fn renewal_cycle(
     let certificate = issue_certificate(&account, config, state).await?;
     storage.save_certificate(&certificate).await?;
     publish_certificate(config, state, storage, certificate).await?;
-    match config.certificate_delivery {
-        CertificateDelivery::File => envoy_log_info!("published renewed certificate files"),
-        CertificateDelivery::Grpc => envoy_log_info!("published renewed SDS secret"),
-    }
+    envoy_log_info!("published renewed certificate files");
     Ok(())
 }
 
@@ -114,7 +111,6 @@ async fn publish_certificate(
     storage: &DiskStorage,
     certificate: Certificate,
 ) -> Result<(), BoxError> {
-    if config.certificate_delivery == CertificateDelivery::File {
         storage
             .save_certificate_files(
                 &certificate,
@@ -122,7 +118,6 @@ async fn publish_certificate(
                 &config.private_key_path(),
             )
             .await?;
-    }
     state.publish(certificate);
     Ok(())
 }

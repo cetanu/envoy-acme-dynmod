@@ -3,8 +3,8 @@
 An Envoy HTTP dynamic module that obtains and renews one SAN certificate with
 ACME HTTP-01 and intercepts challenge requests.
 
-The module currently uses local disk to store the account credentials and
-certificates.
+The module stores ACME account credentials and certificates on local disk and
+publishes the certificate chain and private key as PEM files.
 
 ## Example Configuration
 
@@ -13,7 +13,6 @@ certificates.
   "domains": ["example.com", "www.example.com"],
   "contact_email": "ops@example.com",
   "storage_path": "/var/lib/envoy-acme",
-  "certificate_delivery": "file",
   "certificate_path": "/var/lib/envoy-acme/certificate.pem",
   "private_key_path": "/var/lib/envoy-acme/private-key.pem",
   "acme_directory_url": "https://acme-v02.api.letsencrypt.org/directory",
@@ -63,40 +62,8 @@ common_tls_context:
         filename: /var/lib/envoy-acme/private-key.pem
 ```
 
-### Optional SDS delivery
-
-Use SDS when you specifically want Envoy to receive certificate updates
-through xDS. Set `certificate_delivery` to `grpc` and include the SDS settings
-in the module configuration:
-
-```json
-{
-  "certificate_delivery": "grpc",
-  "sds_address": "127.0.0.1:50051",
-  "secret_name": "example-certificate"
-}
-```
-
-Configure an HTTP/2 static cluster for the in-process SDS server:
-
-```yaml
-- name: acme_sds
-  connect_timeout: 1s
-  type: STATIC
-  typed_extension_protocol_options:
-    envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
-      "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
-      explicit_http_config:
-        http2_protocol_options: {}
-  load_assignment:
-    cluster_name: acme_sds
-    endpoints:
-      - lb_endpoints:
-          - endpoint:
-              address:
-                socket_address:
-                  address: 127.0.0.1
-                  port_value: 50051
-```
-
-Then use `tls_certificate_sds_secret_configs` with that cluster.
+Certificate delivery is filesystem-only; the module does not expose an SDS server.
+Renewal replaces the PEM files, but Envoy does not automatically reload static
+`tls_certificates` when those files change. Configure an external Envoy
+configuration reload/restart mechanism to pick up renewed certificates, or
+provide the files through a separately managed filesystem-watching SDS setup.
