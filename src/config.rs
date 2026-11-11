@@ -194,12 +194,15 @@ mod tests {
 
     #[test]
     fn rejects_legacy_grpc_configuration() {
-        let error = Config::parse(br#"{
+        let error = Config::parse(
+            br#"{
             "domains": ["example.com"],
             "contact_email": "ops@example.com",
             "storage_path": "/tmp/acme",
             "certificate_delivery": "grpc"
-        }"#).unwrap_err();
+        }"#,
+        )
+        .unwrap_err();
         assert!(error.contains("unknown field"));
     }
 }

@@ -111,12 +111,6 @@ fn new_http_filter_config<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
 }
 
 fn is_validation_mode() -> bool {
-    #[cfg(feature = "envoy_1_37")]
-    {
-        false
-    }
-
-    #[cfg(not(feature = "envoy_1_37"))]
     {
         unsafe { envoy_proxy_dynamic_modules_rust_sdk::is_validation_mode() }
     }

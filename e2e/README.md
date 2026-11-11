@@ -13,7 +13,9 @@ Run the complete test from the repository root:
 just e2e
 ```
 
-The test proves that:
+`just e2e` and `just e2e-up` remove the previous test environment and its
+persisted certificates before starting, because Pebble generates a new CA and
+account database on startup. The test proves that:
 
 1. Pebble resolves `acme.test` to the Envoy container through
    `pebble-challtestsrv`.

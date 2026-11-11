@@ -15,7 +15,6 @@ x509-parser = "0.18.1"
 
 [features]
 default = []
-envoy_1_37 = []
 
 
 [lib]

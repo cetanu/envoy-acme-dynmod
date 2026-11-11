@@ -52,7 +52,6 @@ static_resources:
                             "domains":["acme.test"],
                             "contact_email":"admin@acme.test",
                             "storage_path":"/var/lib/envoy-acme",
-                            "certificate_delivery":"file",
                             "acme_directory_url":"https://pebble:14000/dir",
                             "renew_before_days":30,
                             "check_interval_seconds":5

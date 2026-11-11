@@ -111,12 +111,12 @@ async fn publish_certificate(
     storage: &DiskStorage,
     certificate: Certificate,
 ) -> Result<(), BoxError> {
-        storage
-            .save_certificate_files(
-                &certificate,
-                &config.certificate_path(),
-                &config.private_key_path(),
-            )
+    storage
+        .save_certificate_files(
+            &certificate,
+            &config.certificate_path(),
+            &config.private_key_path(),
+        )
         .await?;
     state.publish(certificate);
     Ok(())
