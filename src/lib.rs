@@ -1,27 +1,19 @@
 mod acme;
 mod config;
 mod http_filter;
-mod sds;
 mod state;
 mod storage;
 
 use std::sync::{Arc, OnceLock};
 
-use config::{CertificateDelivery, Config};
+use config::Config;
 use envoy_proxy_dynamic_modules_rust_sdk::{
     EnvoyHttpFilter, EnvoyHttpFilterConfig, HttpFilterConfig, declare_init_functions,
 };
 use http_filter::AcmeFilterConfig;
-use sds::SdsService;
 use state::SharedState;
 use storage::DiskStorage;
-use tokio::{net::TcpListener, runtime::Runtime};
-use tokio_stream::wrappers::TcpListenerStream;
-use tonic::transport::Server;
-
-pub(crate) mod proto {
-    tonic::include_proto!("generated_protos");
-}
+use tokio::runtime::Runtime;
 
 static APP: OnceLock<Arc<App>> = OnceLock::new();
 
@@ -43,32 +35,6 @@ impl App {
             .block_on(storage.prepare())
             .map_err(|error| format!("failed to prepare storage: {error}"))?;
 
-        if config.certificate_delivery == CertificateDelivery::Grpc {
-            let listener = runtime
-                .block_on(TcpListener::bind(config.sds_address()))
-                .map_err(|error| format!("failed to bind SDS listener: {error}"))?;
-
-            let sds = SdsService::new(
-                config
-                    .secret_name
-                    .clone()
-                    .expect("configuration was validated"),
-                Arc::clone(&state),
-            );
-            runtime.spawn(async move {
-                let result = Server::builder()
-                    .add_service(
-                        proto::envoy::service::secret::v3::secret_discovery_service_server::SecretDiscoveryServiceServer::new(sds),
-                    )
-                    .serve_with_incoming(TcpListenerStream::new(listener))
-                    .await;
-                if let Err(error) = result {
-                    envoy_proxy_dynamic_modules_rust_sdk::envoy_log_error!(
-                        "SDS server stopped: {error}"
-                    );
-                }
-            });
-        }
         runtime.spawn(acme::run(Arc::clone(&config), Arc::clone(&state), storage));
 
         Ok(Arc::new(Self {
@@ -145,12 +111,6 @@ fn new_http_filter_config<EC: EnvoyHttpFilterConfig, EHF: EnvoyHttpFilter>(
 }
 
 fn is_validation_mode() -> bool {
-    #[cfg(feature = "envoy_1_37")]
-    {
-        false
-    }
-
-    #[cfg(not(feature = "envoy_1_37"))]
     {
         unsafe { envoy_proxy_dynamic_modules_rust_sdk::is_validation_mode() }
     }

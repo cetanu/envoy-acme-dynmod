@@ -1,5 +1,4 @@
 use std::{
-    net::SocketAddr,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -26,14 +25,6 @@ pub struct Config {
     #[serde(default)]
     #[validate(custom = validate_optional_path)]
     pub private_key_path: Option<PathBuf>,
-    #[serde(default)]
-    pub certificate_delivery: CertificateDelivery,
-    #[serde(default)]
-    #[validate(custom = validate_optional_sds_address)]
-    pub sds_address: Option<String>,
-    #[serde(default)]
-    #[validate(custom = validate_optional_secret_name)]
-    pub secret_name: Option<String>,
     #[serde(default = "default_directory_url")]
     #[validate(custom = validate_acme_directory_url)]
     pub acme_directory_url: String,
@@ -55,17 +46,9 @@ impl Config {
         config
             .validate()
             .map_err(|error| format!("invalid configuration: {error}"))?;
-        validate_delivery_config(&config)?;
+        validate_certificate_paths(&config)?;
         config.domains.sort();
         Ok(config)
-    }
-
-    pub fn sds_address(&self) -> SocketAddr {
-        self.sds_address
-            .as_deref()
-            .expect("configuration was validated")
-            .parse()
-            .expect("configuration was validated")
     }
 
     pub fn certificate_path(&self) -> PathBuf {
@@ -87,14 +70,6 @@ impl Config {
     pub fn check_interval(&self) -> Duration {
         Duration::from_secs(self.check_interval_seconds)
     }
-}
-
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum CertificateDelivery {
-    #[default]
-    File,
-    Grpc,
 }
 
 fn validate_domains(domains: &[String]) -> Result<(), ValidationError> {
@@ -147,42 +122,7 @@ fn validate_optional_path(path: &Option<PathBuf>) -> Result<(), ValidationError>
     Ok(())
 }
 
-fn validate_optional_sds_address(sds_address: &Option<String>) -> Result<(), ValidationError> {
-    let Some(sds_address) = sds_address else {
-        return Ok(());
-    };
-    let address = sds_address
-        .parse::<SocketAddr>()
-        .map_err(|error| ValidationError::Custom(format!("invalid sds_address: {error}")))?;
-    if !address.ip().is_loopback() {
-        return Err(ValidationError::Custom(
-            "sds_address must use a loopback IP because SDS carries private keys".into(),
-        ));
-    }
-    Ok(())
-}
-
-fn validate_optional_secret_name(secret_name: &Option<String>) -> Result<(), ValidationError> {
-    if secret_name
-        .as_deref()
-        .is_some_and(|name| name.trim().is_empty())
-    {
-        return Err(ValidationError::Custom(
-            "secret_name must not be empty".into(),
-        ));
-    }
-    Ok(())
-}
-
-fn validate_delivery_config(config: &Config) -> Result<(), String> {
-    if config.certificate_delivery == CertificateDelivery::Grpc {
-        if config.sds_address.is_none() {
-            return Err("sds_address is required when certificate_delivery is grpc".into());
-        }
-        if config.secret_name.is_none() {
-            return Err("secret_name is required when certificate_delivery is grpc".into());
-        }
-    }
+fn validate_certificate_paths(config: &Config) -> Result<(), String> {
     if config.certificate_path() == config.private_key_path() {
         return Err("certificate_path and private_key_path must be different".into());
     }
@@ -229,10 +169,6 @@ mod tests {
         assert_eq!(config.renew_before_days, 30);
         assert_eq!(config.check_interval_seconds, 43_200);
         assert_eq!(
-            config.certificate_delivery,
-            super::CertificateDelivery::File
-        );
-        assert_eq!(
             config.certificate_path(),
             std::path::Path::new("/var/lib/envoy-acme/certificate.pem")
         );
@@ -248,9 +184,7 @@ mod tests {
             br#"{
                 "domains": ["*.example.com"],
                 "contact_email": "ops@example.com",
-                "storage_path": "/tmp/acme",
-                "sds_address": "127.0.0.1:50051",
-                "secret_name": "certificate"
+                "storage_path": "/tmp/acme"
             }"#,
         )
         .unwrap_err();
@@ -259,17 +193,16 @@ mod tests {
     }
 
     #[test]
-    fn requires_sds_settings_for_grpc_delivery() {
+    fn rejects_legacy_grpc_configuration() {
         let error = Config::parse(
             br#"{
-                "domains": ["example.com"],
-                "contact_email": "ops@example.com",
-                "storage_path": "/tmp/acme",
-                "certificate_delivery": "grpc"
-            }"#,
+            "domains": ["example.com"],
+            "contact_email": "ops@example.com",
+            "storage_path": "/tmp/acme",
+            "certificate_delivery": "grpc"
+        }"#,
         )
         .unwrap_err();
-
-        assert!(error.contains("sds_address is required"));
+        assert!(error.contains("unknown field"));
     }
 }

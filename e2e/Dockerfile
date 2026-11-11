@@ -3,13 +3,11 @@ FROM docker.io/library/rust:1.96-bookworm AS module-builder
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
         clang \
-        cmake \
         libclang-dev \
-        protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
-COPY Cargo.toml Cargo.lock build.rs ./
+COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 RUN cargo build --locked --release
 

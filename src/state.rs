@@ -55,8 +55,4 @@ impl SharedState {
     pub fn certificate(&self) -> Option<Arc<Certificate>> {
         self.certificate_tx.borrow().clone()
     }
-
-    pub fn subscribe(&self) -> watch::Receiver<Option<Arc<Certificate>>> {
-        self.certificate_tx.subscribe()
-    }
 }

@@ -5,8 +5,8 @@ compose := "podman compose -f e2e/compose.yaml"
 # Build the environment, issue a certificate, and run the Rust integration test.
 e2e: e2e-up e2e-verify
 
-# Start the E2E services without running verification or automatic cleanup.
-e2e-up:
+# Start a fresh E2E environment without running verification.
+e2e-up: e2e-down
     {{ compose }} up --detach --build envoy
 
 # Verify HTTP-01 issuance, file delivery, and certificate validity.

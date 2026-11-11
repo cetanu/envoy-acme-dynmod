@@ -95,18 +95,6 @@ impl<EHF: EnvoyHttpFilter> HttpFilter<EHF> for AcmeFilter {
     }
 }
 
-#[cfg(feature = "envoy_1_37")]
-fn send_response<'a, EHF: EnvoyHttpFilter>(
-    envoy: &mut EHF,
-    status_code: u32,
-    headers: &[(&'a str, &'a [u8])],
-    body: Option<&'a [u8]>,
-    details: Option<&'a str>,
-) {
-    envoy.send_response(status_code, headers.to_vec(), body, details);
-}
-
-#[cfg(not(feature = "envoy_1_37"))]
 fn send_response<'a, EHF: EnvoyHttpFilter>(
     envoy: &mut EHF,
     status_code: u32,
