@@ -120,7 +120,29 @@ impl DiskStorage {
         set_owner_only_file(&certificate_temporary).await?;
         set_owner_only_file(&private_key_temporary).await?;
         fs::rename(&certificate_temporary, certificate_path).await?;
-        fs::rename(&private_key_temporary, private_key_path).await
+        fs::rename(&private_key_temporary, private_key_path).await?;
+
+        // Publish the matching pair in one rename, so Envoy never observes a
+        // new certificate with an old key (or vice versa).
+        let secret = serde_json::json!({
+            "resources": [{
+                "@type": "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret",
+                "name": "acme_certificate",
+                "tls_certificate": {
+                    "certificate_chain": { "inline_string": certificate.chain_pem },
+                    "private_key": { "inline_string": certificate.private_key_pem }
+                }
+            }]
+        });
+        let temporary = self.root.join(".secret.json.tmp");
+        let destination = self.root.join("secret.json");
+        fs::write(
+            &temporary,
+            serde_json::to_vec(&secret).map_err(io::Error::other)?,
+        )
+        .await?;
+        set_owner_only_file(&temporary).await?;
+        fs::rename(temporary, destination).await
     }
 }
 
@@ -156,4 +178,39 @@ async fn set_owner_only_file(path: &Path) -> io::Result<()> {
 #[cfg(not(unix))]
 async fn set_owner_only_file(_path: &Path) -> io::Result<()> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn publishes_matching_pair_as_one_sds_resource() {
+        let root = std::env::temp_dir().join(format!("envoy-acme-secret-{}", std::process::id()));
+        let storage = DiskStorage::new(root.clone());
+        storage.prepare().await.unwrap();
+        for (chain, key) in [
+            ("first chain", "first key"),
+            ("renewed chain", "renewed key"),
+        ] {
+            let certificate = Certificate::new(chain.into(), key.into());
+            storage
+                .save_certificate_files(&certificate, &root.join("cert.pem"), &root.join("key.pem"))
+                .await
+                .unwrap();
+            let secret: serde_json::Value =
+                serde_json::from_slice(&fs::read(root.join("secret.json")).await.unwrap()).unwrap();
+            let resource = &secret["resources"][0];
+            assert_eq!(resource["name"], "acme_certificate");
+            assert_eq!(
+                resource["tls_certificate"]["certificate_chain"]["inline_string"],
+                chain
+            );
+            assert_eq!(
+                resource["tls_certificate"]["private_key"]["inline_string"],
+                key
+            );
+        }
+        fs::remove_dir_all(root).await.unwrap();
+    }
 }

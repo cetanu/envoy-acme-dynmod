@@ -51,19 +51,23 @@ filter. A current token for the request host returns `200`; missing tokens
 return `404`; methods other than GET and HEAD return `405`. Other paths pass
 through unchanged.
 
-Reference the generated PEM files from a downstream TLS context:
+Configure a filesystem-backed SDS secret in the downstream TLS context:
 
 ```yaml
 common_tls_context:
-  tls_certificates:
-    - certificate_chain:
-        filename: /var/lib/envoy-acme/certificate.pem
-      private_key:
-        filename: /var/lib/envoy-acme/private-key.pem
+  tls_certificate_sds_secret_configs:
+    - name: acme_certificate
+      sds_config:
+        path_config_source:
+          path: /var/lib/envoy-acme/secret.json
+        initial_fetch_timeout: 1s
 ```
 
-Certificate delivery is filesystem-only; the module does not expose an SDS server.
-Renewal replaces the PEM files, but Envoy does not automatically reload static
-`tls_certificates` when those files change. Configure an external Envoy
-configuration reload/restart mechanism to pick up renewed certificates, or
-provide the files through a separately managed filesystem-watching SDS setup.
+The module atomically replaces `secret.json` with the certificate and key as a
+single SDS resource after issuance and renewal. Envoy watches that file and
+reloads the secret without a restart; no SDS server is needed. The PEM files
+are also written for other consumers. Create `storage_path` before starting
+Envoy so it can establish the filesystem watch. On first issuance, the TLS
+listener cannot serve connections until the certificate is available; the
+short initial fetch timeout allows the HTTP-01 listener to start meanwhile.
+The secret file contains the private key and must be accessible only to Envoy.
