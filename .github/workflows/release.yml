@@ -19,9 +19,9 @@ jobs:
           - ubuntu-22.04
           - ubuntu-24.04
         envoy_version:
+          - "1.40.0"
           - "1.39.0"
           - "1.38.0"
-          - "1.37.0"
 
     steps:
       - name: Check out release tag
@@ -32,9 +32,6 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install protobuf compiler
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y protobuf-compiler
-
       - name: Detect glibc version
         id: glibc
         run: |
@@ -42,24 +39,10 @@ jobs:
           glibc_version="${glibc_version#glibc }"
           echo "version=${glibc_version}" >> "$GITHUB_OUTPUT"
 
-      - name: Select Envoy version
-        env:
-          ENVOY_VERSION: ${{ matrix.envoy_version }}
-        run: |
-          sed -i.bak "s|tag = \"v[0-9.]*\"|tag = \"v${ENVOY_VERSION}\"|" Cargo.toml
-          sed -i.bak "s|const ENVOY_TAG: &str = \"v[0-9.]*\";|const ENVOY_TAG: \&str = \"v${ENVOY_VERSION}\";|" build.rs
-          rm Cargo.toml.bak build.rs.bak
-          cargo update -p envoy-proxy-dynamic-modules-rust-sdk
-
       - name: Compile dynamic module
-        env:
-          ENVOY_VERSION: ${{ matrix.envoy_version }}
         run: |
-          if [ "$ENVOY_VERSION" = "1.37.0" ]; then
-            cargo build --locked --release --features envoy_1_37
-          else
-            cargo build --locked --release
-          fi
+          cargo update -p envoy-proxy-dynamic-modules-rust-sdk
+          cargo build --locked --release
 
       - name: Attach dynamic module to release
         env:
