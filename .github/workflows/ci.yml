@@ -1,0 +1,188 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing draft release tag to build, publish, and deploy
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions: {}
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.release_tag) || github.sha }}
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run tests
+        run: cargo test --locked
+
+  build:
+    name: Build Envoy ${{ matrix.envoy_version }} module on ${{ matrix.os }}
+    needs: [test]
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - ubuntu-22.04
+          - ubuntu-24.04
+        envoy_version:
+          - "1.40.0"
+          - "1.39.0"
+          - "1.38.0"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.release_tag) || github.sha }}
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Detect glibc version
+        id: glibc
+        run: |
+          glibc_version="$(getconf GNU_LIBC_VERSION)"
+          glibc_version="${glibc_version#glibc }"
+          echo "version=${glibc_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Compile dynamic module
+        run: |
+          cargo update -p envoy-proxy-dynamic-modules-rust-sdk
+          cargo build --locked --release
+
+      - name: Preserve tested module
+        env:
+          ENVOY_VERSION: ${{ matrix.envoy_version }}
+          RUNNER_OS_VERSION: ${{ matrix.os }}
+          GLIBC_VERSION: ${{ steps.glibc.outputs.version }}
+        run: |
+          module_path="target/release/libenvoy_acme_dynmod-envoy-${ENVOY_VERSION}-${RUNNER_OS_VERSION}-glibc-${GLIBC_VERSION}.so"
+          mv target/release/libenvoy_acme_dynmod.so "$module_path"
+          mkdir -p release
+          mv "$module_path" release/
+
+      - name: Upload tested module
+        uses: actions/upload-artifact@v4
+        with:
+          name: envoy-acme-dynmod-envoy-${{ matrix.envoy_version }}-${{ matrix.os }}
+          path: release/*.so
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Create draft release
+    needs: [test]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - id: release-plz
+        uses: release-plz/action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get released tag
+        id: release
+        env:
+          RELEASES: ${{ steps.release-plz.outputs.releases }}
+        run: |
+          tag="$(jq -r '.[0].tag // empty' <<< "$RELEASES")"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  release-pr:
+    name: Prepare release pull request
+    needs: [test]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  upload-modules:
+    name: Attach tested modules to draft release
+    needs: [release, build]
+    if: always() && needs.build.result == 'success' && (needs.release.outputs.tag != '' || github.event.inputs.release_tag != '')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download tested modules
+        uses: actions/download-artifact@v4
+        with:
+          pattern: envoy-acme-dynmod-*
+          merge-multiple: true
+          path: release
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.release.outputs.tag || github.event.inputs.release_tag }}
+          REPOSITORY: ${{ github.repository }}
+        run: gh release upload "$RELEASE_TAG" release/*.so --clobber --repo "$REPOSITORY"
+
+  publish-release:
+    name: Publish GitHub release
+    needs: [release, upload-modules]
+    if: always() && needs.upload-modules.result == 'success' && (needs.release.outputs.tag != '' || github.event.inputs.release_tag != '')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.release.outputs.tag || github.event.inputs.release_tag }}
+          REPOSITORY: ${{ github.repository }}
+        run: gh release edit "$RELEASE_TAG" --repo "$REPOSITORY" --draft=false

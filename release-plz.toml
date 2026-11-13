@@ -1,0 +1,15 @@
+[workspace]
+# Git tags record releases; there is no registry publication.
+git_tag_enable = true
+
+# A release is only public after its modules are attached.
+git_release_draft = true
+
+# The module is distributed through GitHub releases, not crates.io.
+publish = false
+
+[[package]]
+name = "envoy-acme-dynmod"
+# Determine unpublished versions from Git tags matching v*
+git_only = true
+git_tag_name = "v{{ version }}"
