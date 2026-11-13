@@ -51,6 +51,18 @@ filter. A current token for the request host returns `200`; missing tokens
 return `404`; methods other than GET and HEAD return `405`. Other paths pass
 through unchanged.
 
+Before starting Envoy for the first time, create the storage directory and an
+empty SDS response. Do not overwrite an existing secret on subsequent starts:
+
+```sh
+install -d -m 700 /var/lib/envoy-acme
+if [ ! -e /var/lib/envoy-acme/secret.json ]; then
+  (umask 077; printf '{"resources":[]}' > /var/lib/envoy-acme/secret.json)
+fi
+```
+
+The directory and file must be accessible to the Envoy process. Envoy logs a
+rejected update for the empty response until the first certificate is issued.
 Configure a filesystem-backed SDS secret in the downstream TLS context:
 
 ```yaml
@@ -66,8 +78,7 @@ common_tls_context:
 The module atomically replaces `secret.json` with the certificate and key as a
 single SDS resource after issuance and renewal. Envoy watches that file and
 reloads the secret without a restart; no SDS server is needed. The PEM files
-are also written for other consumers. Create `storage_path` before starting
-Envoy so it can establish the filesystem watch. On first issuance, the TLS
-listener cannot serve connections until the certificate is available; the
-short initial fetch timeout allows the HTTP-01 listener to start meanwhile.
+are also written for other consumers. On first issuance, the TLS listener
+cannot serve connections until the certificate is available; the HTTP-01
+listener can start while the secret is unavailable.
 The secret file contains the private key and must be accessible only to Envoy.
